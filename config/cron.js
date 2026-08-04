@@ -9,7 +9,6 @@ const { sendSubscriptionExpiryEmail } = require('./email');
  */
 const startSubscriptionCron = () => {
     cron.schedule('0 9 * * *', async () => {
-        console.log('[Cron] Running daily subscription expiry check...');
         try {
             const today = new Date();
             const todayStr = today.toISOString().split('T')[0];
@@ -28,14 +27,10 @@ const startSubscriptionCron = () => {
             for (const vendor of (result.rows || [])) {
                 await sendSubscriptionExpiryEmail(vendor, vendor.days_left);
             }
-
-            console.log(`[Cron] Done. Emailed ${(result.rows || []).length} vendor(s).`);
         } catch (err) {
             console.error('[Cron] Error during subscription check:', err.message);
         }
     });
-
-    console.log('[Cron] Subscription expiry check scheduled (daily at 9:00 AM).');
 };
 
 module.exports = { startSubscriptionCron };

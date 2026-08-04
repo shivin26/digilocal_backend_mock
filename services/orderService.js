@@ -112,8 +112,6 @@ class OrderService {
         );
       }
 
-      console.log(`[OrderService] Order #${order_id} placed successfully for Customer: ${customer_name} | Vendor ID: ${vendor_id} | Total: ₹${computedTotalAmount.toFixed(2)}`);
-
       return {
         order_id,
         total_amount: computedTotalAmount,
@@ -156,7 +154,6 @@ class OrderService {
    */
   async updateOrderStatus(orderId, status) {
     await query(`UPDATE orders SET status = ? WHERE order_id = ?`, [status, orderId]);
-    console.log(`[OrderService] Order #${orderId} status updated to '${status}'`);
     return { status };
   }
 }

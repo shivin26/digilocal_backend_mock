@@ -2,7 +2,7 @@ const { query } = require('../db');
 const express = require('express');
 const router = express.Router();
 const memoryCache = require('../utils/cache');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requireVendor } = require('../middleware/auth');
 
 // GET /api/societies - List all societies (searchable & cached)
 router.get('/', async (req, res) => {
@@ -72,9 +72,10 @@ router.get('/:societyId', async (req, res) => {
     }
 });
 
-// POST /api/societies - Admin add society
-router.post('/', authenticateToken, requireAdmin, async (req, res) => {
+// POST /api/societies - Admin, vendor can add society
+router.post('/', authenticateToken, requireVendor, async (req, res) => {
     try {
+        console.log('[Create Society Request] Received payload:', req.body);
         const { society_name, location } = req.body;
         if (!society_name || !location)
             return res.status(400).json({ error: 'Society name and location are required' });

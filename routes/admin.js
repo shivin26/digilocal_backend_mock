@@ -2,7 +2,30 @@ const { query } = require('../db');
 const express = require('express');
 const router = express.Router();
 const memoryCache = require('../utils/cache');
+const { generateTokens } = require('../utils/auth');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
+
+// POST /api/admin/login - Admin Login with ADMIN_SECRET
+router.post('/login', (req, res) => {
+    const { admin_secret, secret, password, email } = req.body;
+    const configuredSecret = process.env.ADMIN_SECRET || 'admin123';
+    const inputSecret = admin_secret || secret || password;
+
+    if (inputSecret === configuredSecret) {
+        const adminUser = { id: 1, email: email || 'admin@digilocal.com', role: 'admin' };
+        const tokens = generateTokens(adminUser);
+        return res.status(200).json({
+            message: 'Admin authentication successful',
+            role: 'admin',
+            token: tokens.accessToken,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            expiresIn: tokens.expiresIn
+        });
+    }
+
+    res.status(401).json({ error: 'Invalid admin secret key' });
+});
 
 // GET /api/admin/vendors - All vendors with payment/subscription info (N+1 Optimized & Paginated)
 router.get('/vendors', authenticateToken, requireAdmin, async (req, res) => {

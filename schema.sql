@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS societies (
     society_id BIGSERIAL PRIMARY KEY,
     society_name VARCHAR(100) NOT NULL,
     location VARCHAR(255) NOT NULL,
+    public_id VARCHAR(10),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -18,7 +19,15 @@ CREATE TABLE IF NOT EXISTS vendors (
     store_name VARCHAR(100) NOT NULL,
     logo TEXT DEFAULT 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=200&auto=format&fit=crop&q=80',
     description TEXT DEFAULT 'Welcome to our store on DigiLocal!',
+    opening_timing VARCHAR(20) DEFAULT '08:00 AM',
+    closing_timing VARCHAR(20) DEFAULT '10:00 PM',
+    min_order_value DECIMAL(10,2) DEFAULT 0.00,
+    max_quantity_limit INT DEFAULT 10,
+    delivery_charge DECIMAL(10,2) DEFAULT 0.00,
+    gst_percentage DECIMAL(5,2) DEFAULT 5.00,
+    service_charge_percentage DECIMAL(5,2) DEFAULT 0.00,
     status VARCHAR(20) DEFAULT 'PENDING',
+    public_id VARCHAR(10),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -82,4 +91,9 @@ CREATE TABLE IF NOT EXISTS payments (
     status VARCHAR(20) DEFAULT 'SUCCESS',
     paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS platform_config (
+    config_key VARCHAR(100) PRIMARY KEY,
+    config_value TEXT NOT NULL
 );

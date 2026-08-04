@@ -140,12 +140,17 @@ function verifyJwt(token, secret) {
 /**
  * Generates an Access Token (24h) and Refresh Token (7d) pair.
  */
-function generateTokens(vendorOrUser) {
+function generateTokens(vendorOrUser, targetRole = null) {
+  const role = targetRole || vendorOrUser.role || (vendorOrUser.email?.includes('admin') ? 'admin' : 'vendor');
   const payload = {
     id: vendorOrUser.vendor_id || vendorOrUser.id || vendorOrUser.user_id,
     vendor_id: vendorOrUser.vendor_id || vendorOrUser.id,
     email: vendorOrUser.email,
-    role: vendorOrUser.role || (vendorOrUser.email?.includes('admin') ? 'admin' : 'vendor')
+    name: vendorOrUser.vendor_name || vendorOrUser.customer_name || vendorOrUser.name || 'User',
+    role: role,
+    roles: [role, 'user', 'customer'],
+    isVendor: role === 'vendor' || role === 'admin',
+    isUser: true
   };
 
   const accessToken = signJwt(payload, authConfig.jwt.secret, 24 * 3600); // 24 Hours

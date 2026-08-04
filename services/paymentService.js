@@ -32,7 +32,6 @@ class PaymentService {
         console.error(`[Payment Security Alert] Invalid Razorpay HMAC signature for vendor_id: ${vendor_id} | Txn: ${txnId}`);
         throw new Error('Payment security verification failed: Invalid HMAC signature');
       }
-      console.log(`[Payment Security] Signature verified successfully for Txn: ${txnId}`);
     } else if (process.env.NODE_ENV === 'production' && razorpaySecret) {
       throw new Error('Payment security verification failed: Missing Razorpay signature parameters');
     }
@@ -94,8 +93,6 @@ class PaymentService {
         [subId, vendor_id, amount, payment_method, txnId]
       );
 
-      console.log(`[Payment Audit] Payment #${payRes.insertId} verified & processed. Subscription #${subId} activated for Vendor #${vendor_id}`);
-
       return {
         payment_id: payRes.insertId,
         subscription_id: subId,
@@ -129,8 +126,6 @@ class PaymentService {
       await txQuery(`UPDATE subscriptions SET status = 'CANCELLED' WHERE subscription_id = ?`, [payment.subscription_id]);
       await txQuery(`UPDATE vendors SET status = 'PENDING' WHERE vendor_id = ?`, [payment.vendor_id]);
 
-      console.log(`[Payment Refund Audit] Payment #${paymentId} refunded (₹${amount}). Subscription #${payment.subscription_id} cancelled.`);
-
       return {
         payment_id: paymentId,
         status: 'REFUNDED',
@@ -158,7 +153,6 @@ class PaymentService {
     }
 
     const event = payload.event;
-    console.log(`[Payment Webhook Event] Received: ${event}`);
 
     if (event === 'payment.captured' || event === 'order.paid') {
       const entity = payload.payload?.payment?.entity || payload.payload?.order?.entity;

@@ -95,8 +95,6 @@ class VendorService {
         vendorId
       ]
     );
-
-    console.log(`[VendorService] Store settings updated for vendor_id: ${vendorId}`);
     return { logo: logoUrl };
   }
 

@@ -44,7 +44,11 @@ function requireRole(...allowedRoles) {
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized: Authentication required' });
     }
-    if (!allowedRoles.includes(req.user.role)) {
+    const userRole = req.user.role;
+    const userRoles = req.user.roles || [userRole];
+    const hasPermission = allowedRoles.some(role => allowedRoles.includes(userRole) || userRoles.includes(role));
+
+    if (!hasPermission) {
       return res.status(403).json({ error: `Forbidden: Requires one of [${allowedRoles.join(', ')}] role(s)` });
     }
     next();
@@ -60,6 +64,11 @@ const requireAdmin = requireRole('admin');
  * Vendor Access Guard.
  */
 const requireVendor = requireRole('vendor', 'admin');
+
+/**
+ * User / Customer Access Guard (Permits users, customers, vendors, and admins).
+ */
+const requireUser = requireRole('user', 'customer', 'vendor', 'admin');
 
 /**
  * Vendor Ownership & IDOR Protection Guard.
@@ -87,5 +96,6 @@ module.exports = {
   requireRole,
   requireAdmin,
   requireVendor,
+  requireUser,
   requireVendorOwner
 };

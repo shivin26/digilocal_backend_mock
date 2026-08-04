@@ -26,7 +26,6 @@ class EmailQueueProcessor extends EventEmitter {
       enqueuedAt: Date.now()
     });
 
-    console.log(`[EmailQueue] Task '${taskName}' enqueued. Queue length: ${this.queue.length}`);
     setImmediate(() => this.processNext());
   }
 
@@ -44,13 +43,11 @@ class EmailQueueProcessor extends EventEmitter {
     try {
       item.attempts += 1;
       await item.sendMailFn();
-      console.log(`[EmailQueue] Task '${item.taskName}' completed successfully (Attempt ${item.attempts}).`);
     } catch (err) {
       console.error(`[EmailQueue Error] Task '${item.taskName}' failed on attempt ${item.attempts}:`, err.message);
 
       if (item.attempts < this.maxRetries) {
         const delay = this.baseDelayMs * Math.pow(2, item.attempts - 1);
-        console.log(`[EmailQueue Retry] Scheduling retry for '${item.taskName}' in ${delay}ms...`);
         setTimeout(() => {
           this.queue.push(item);
           this.processNext();

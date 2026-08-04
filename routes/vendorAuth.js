@@ -30,7 +30,7 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
 
         const existing = await query(`SELECT vendor_id FROM vendors WHERE email = ?`, [email]);
         if (existing.rows.length > 0)
-            return res.status(400).json({ error: 'An account with this email address already exists' });
+            return res.status(400).json({ error: 'An account with this email address already exists. If you are already registered as a vendor, you can log in directly as a user with your existing credentials.' });
 
         const hashedPassword = await hashPassword(password);
         const defaultLogo = 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=200&auto=format&fit=crop&q=80';
@@ -126,6 +126,77 @@ router.post('/login', loginBruteForceGuard, validateRequest(loginSchema), async 
     }
 });
 
+// POST /api/vendors/user-login or /api/users/login - Allows Vendor to log in as a User/Customer
+const handleUserLogin = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const vendorRes = await query(`SELECT * FROM vendors WHERE email = ?`, [email]);
+        if (vendorRes.rows.length === 0) {
+            recordFailedAttempt(email);
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        const vendor = vendorRes.rows[0];
+
+        const passwordMatch = await comparePassword(password, vendor.password);
+        if (!passwordMatch.matches) {
+            recordFailedAttempt(email);
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        resetFailedAttempts(email);
+
+        delete vendor.password;
+        const tokens = generateTokens({ ...vendor, role: 'user' }, 'user');
+
+        res.status(200).json({
+            message: 'User login successful (Vendor acting as User)',
+            user: {
+                id: vendor.vendor_id,
+                vendor_id: vendor.vendor_id,
+                name: vendor.vendor_name,
+                email: vendor.email,
+                phone_number: vendor.phone_number,
+                role: 'user'
+            },
+            role: 'user',
+            token: tokens.accessToken,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken
+        });
+    } catch (err) {
+        console.error('Error during user login:', err);
+        res.status(500).json({ error: 'User login failed' });
+    }
+};
+
+router.post('/user-login', loginBruteForceGuard, validateRequest(loginSchema), handleUserLogin);
+router.post('/login-as-user', loginBruteForceGuard, validateRequest(loginSchema), handleUserLogin);
+
+// POST /api/users/user-register - User signup check (prevents duplicate vendor signup)
+router.post('/user-register', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({ error: 'Email address is required' });
+        }
+
+        const existingVendor = await query(`SELECT vendor_id FROM vendors WHERE email = ?`, [email]);
+        if (existingVendor.rows.length > 0) {
+            return res.status(400).json({
+                error: 'An account with this email address already exists as a vendor. You do not need to sign up again—you can log in directly as a user using your existing vendor credentials.',
+                alreadyRegisteredAsVendor: true
+            });
+        }
+
+        res.status(200).json({ message: 'Email address available for user registration' });
+    } catch (err) {
+        console.error('Error verifying user registration email:', err);
+        res.status(500).json({ error: 'Failed to verify email address' });
+    }
+});
+
 // POST /api/vendors/refresh
 router.post('/refresh', (req, res) => {
     const { refreshToken } = req.body;
@@ -165,7 +236,6 @@ router.post('/forgot-password', validateRequest(forgotPasswordSchema), async (re
         }
 
         const otp = generateOTP(email);
-        console.log(`[OTP Sent] Password reset OTP for ${email}: ${otp}`);
 
         res.status(200).json({
             message: 'OTP sent successfully to registered email address',

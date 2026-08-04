@@ -18,12 +18,10 @@ const sendMailAsync = async ({ to, subject, html, taskName = 'email' }) => {
   const from = process.env.EMAIL_FROM || `DigiLocal Platform <${process.env.EMAIL_USER || 'no-reply@digilocal.in'}>`;
 
   if (!process.env.EMAIL_USER || process.env.EMAIL_USER === 'your_gmail@gmail.com') {
-    console.log(`[Email Simulation] (${taskName}) Would send to: ${to} | Subject: "${subject}"`);
     return;
   }
 
   await transporter.sendMail({ from, to, subject, html });
-  console.log(`[Email Delivered] (${taskName}) Sent successfully to: ${to}`);
 };
 
 /**

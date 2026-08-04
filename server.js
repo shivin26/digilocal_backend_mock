@@ -46,7 +46,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(compressionMiddleware);
 app.use(loggerMiddleware);
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5000;
 
 // ── Database Init ────────────────────────────────────────────
 initDb().catch(err => {
@@ -112,6 +112,7 @@ app.use('/api/societies', societiesRouter);   // Society management
 app.use('/api', storefrontRouter);            // Storefront APIs
 app.use('/api/orders', ordersRouter);         // Customer orders
 app.use('/api/vendors', vendorAuthRouter);    // Vendor auth
+app.use('/api/users', vendorAuthRouter);      // User auth (Vendors logging in as users)
 app.use('/api/vendorPanel', vendorPanelRouter); // Vendor dashboard
 app.use('/api/admin', adminRouter);           // Admin portal
 

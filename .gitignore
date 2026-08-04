@@ -1,0 +1,39 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+web_modules/
+
+# Environment variables & secrets (CRITICAL: Do NOT commit secrets to Git)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# SQLite Database & Storage
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-journal
+digilocal.sqlite
+
+# Server & Application Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Operating System & IDE Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage & Scratch directories
+coverage/
+.nyc_output/
+.antigravity/

@@ -1,7 +1,10 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+
+// Ensure PostgreSQL NUMERIC/DECIMAL types (OID 1700) parse as JS floats
+types.setTypeParser(1700, parseFloat);
 
 let pgPool = null;
 let sqliteDb = null;
@@ -42,8 +45,19 @@ function getDbType() {
  */
 async function initDb() {
   const pgConnectionString = process.env.DATABASE_URL || process.env.PG_URI;
-  if (pgConnectionString || process.env.PGHOST) {
+  const pgHost = process.env.PGHOST;
+
+  if (pgConnectionString || (pgHost && pgHost !== 'localhost')) {
     try {
+      const isCloudOrRender = pgConnectionString && (
+        pgConnectionString.includes('render.com') ||
+        pgConnectionString.includes('sslmode=require') ||
+        process.env.PGSSL === 'true' ||
+        process.env.NODE_ENV === 'production'
+      );
+
+      const sslOption = isCloudOrRender ? { rejectUnauthorized: false } : undefined;
+
       pgPool = new Pool({
         connectionString: pgConnectionString,
         host: process.env.PGHOST || 'localhost',
@@ -51,6 +65,7 @@ async function initDb() {
         user: process.env.PGUSER || 'postgres',
         password: process.env.PGPASSWORD || 'postgres',
         database: process.env.PGDATABASE || 'digilocal',
+        ssl: sslOption,
         max: 20, // Production connection limit
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 5000
@@ -75,7 +90,6 @@ async function initDb() {
   }
 
   // Fallback SQLite setup
-  console.log('[Database] Initializing SQLite fallback database at digilocal.sqlite...');
   const dbPath = path.join(__dirname, 'digilocal.sqlite');
   sqliteDb = new sqlite3.Database(dbPath);
   isPg = false;
@@ -87,10 +101,11 @@ async function initDb() {
         console.error('[Database Error] Failed to enable SQLite foreign keys:', err.message);
         return reject(err);
       }
-      console.log('[Database] SQLite foreign key enforcement enabled.');
       resolve();
     });
   });
+
+  console.log('[Database] Connected to SQLite database successfully.');
 
   await setupTablesSqlite();
   await createIndexes();
@@ -104,17 +119,30 @@ function query(sqlText, params = []) {
     if (isPg && pgPool) {
       // Convert ? placeholders to $1, $2, ... for PostgreSQL
       let paramCount = 0;
-      const pgSql = sqlText.replace(/\?/g, () => `$${++paramCount}`);
+      let pgSql = sqlText.replace(/\?/g, () => `$${++paramCount}`);
+
+      // Automatically append RETURNING * for PostgreSQL INSERT queries if not present
+      const trimmed = pgSql.trim();
+      if (/^INSERT\s+INTO/i.test(trimmed) && !/RETURNING/i.test(trimmed)) {
+        pgSql += ' RETURNING *';
+      }
       
       pgPool.query(pgSql, params, (err, result) => {
         if (err) {
           console.error('[DB Query Error - PostgreSQL]:', err.message, '| Query:', sqlText);
           return reject(new DatabaseError('PostgreSQL query execution failed', err, sqlText));
         }
+        const firstRow = result.rows && result.rows[0] ? result.rows[0] : null;
+        const insertedId = firstRow ? (
+          firstRow.society_id || firstRow.vendor_id || firstRow.customer_id ||
+          firstRow.order_id || firstRow.item_id || firstRow.subscription_id ||
+          firstRow.payment_id || firstRow.id || null
+        ) : null;
+
         resolve({
           rows: result.rows || [],
           rowCount: result.rowCount || 0,
-          insertId: result.rows[0]?.id || result.rows[0]?.vendor_id || result.rows[0]?.order_id || result.rows[0]?.item_id || null
+          insertId: insertedId
         });
       });
     } else {
@@ -154,13 +182,27 @@ async function withTransaction(callback) {
     const txQuery = (sqlText, params = []) => {
       return new Promise((resolve, reject) => {
         let paramCount = 0;
-        const pgSql = sqlText.replace(/\?/g, () => `$${++paramCount}`);
+        let pgSql = sqlText.replace(/\?/g, () => `$${++paramCount}`);
+
+        // Automatically append RETURNING * for PostgreSQL INSERT queries if not present
+        const trimmed = pgSql.trim();
+        if (/^INSERT\s+INTO/i.test(trimmed) && !/RETURNING/i.test(trimmed)) {
+          pgSql += ' RETURNING *';
+        }
+
         client.query(pgSql, params, (err, result) => {
           if (err) return reject(new DatabaseError('PG Transaction Query Failed', err, sqlText));
+          const firstRow = result.rows && result.rows[0] ? result.rows[0] : null;
+          const insertedId = firstRow ? (
+            firstRow.society_id || firstRow.vendor_id || firstRow.customer_id ||
+            firstRow.order_id || firstRow.item_id || firstRow.subscription_id ||
+            firstRow.payment_id || firstRow.id || null
+          ) : null;
+
           resolve({
             rows: result.rows || [],
             rowCount: result.rowCount || 0,
-            insertId: result.rows[0]?.id || result.rows[0]?.vendor_id || result.rows[0]?.order_id || null
+            insertId: insertedId
           });
         });
       });
@@ -216,7 +258,6 @@ async function createIndexes() {
       // Ignore existing index warnings across DB drivers
     }
   }
-  console.log('[Database] Performance indexes verified.');
 }
 
 /**
@@ -227,8 +268,38 @@ async function setupTablesPg() {
   if (fs.existsSync(schemaPath)) {
     const schemaSql = fs.readFileSync(schemaPath, 'utf8');
     await pgPool.query(schemaSql);
-    await seedInitialData();
   }
+
+  // Safe column migration for existing PostgreSQL databases
+  const columns = [
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS opening_timing VARCHAR(20) DEFAULT '08:00 AM'`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS closing_timing VARCHAR(20) DEFAULT '10:00 PM'`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS min_order_value DECIMAL(10,2) DEFAULT 0.00`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS max_quantity_limit INT DEFAULT 10`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS delivery_charge DECIMAL(10,2) DEFAULT 0.00`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_percentage DECIMAL(5,2) DEFAULT 5.00`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS service_charge_percentage DECIMAL(5,2) DEFAULT 0.00`,
+    `ALTER TABLE societies ADD COLUMN IF NOT EXISTS public_id VARCHAR(10)`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS public_id VARCHAR(10)`
+  ];
+
+  for (const colSql of columns) {
+    try { await pgPool.query(colSql); } catch (_) {}
+  }
+
+  // Backfill public_id if missing
+  const socRows = await query(`SELECT society_id FROM societies WHERE public_id IS NULL`);
+  for (const r of (socRows.rows || [])) {
+    let pid = genPublicId(5);
+    await query(`UPDATE societies SET public_id = ? WHERE society_id = ?`, [pid, r.society_id]);
+  }
+  const venRows = await query(`SELECT vendor_id FROM vendors WHERE public_id IS NULL`);
+  for (const r of (venRows.rows || [])) {
+    let pid = genPublicId(6);
+    await query(`UPDATE vendors SET public_id = ? WHERE vendor_id = ?`, [pid, r.vendor_id]);
+  }
+
+  await seedInitialData();
 }
 
 /**
@@ -395,7 +466,6 @@ async function seedInitialData() {
   const count = parseInt(socCheck.rows[0]?.count || 0);
 
   if (count === 0) {
-    console.log('[Database] Seeding initial DigiLocal data...');
     await query(`INSERT INTO societies (society_name, location, public_id) VALUES 
       ('Greenwood Residency', 'Block A, Sector 62, Noida', '${genPublicId(5)}'),
       ('Palm Meadows Apartment', 'Phase 2, Whitefield, Bangalore', '${genPublicId(5)}'),
@@ -452,7 +522,6 @@ async function seedInitialData() {
       (1, 2, 1, 240.00, 240.00)
     `);
 
-    console.log('[Database] Seeding completed successfully.');
   }
 }
 
@@ -461,10 +530,8 @@ async function seedInitialData() {
  */
 async function closeDb() {
   if (isPg && pgPool) {
-    console.log('[Database] Closing PostgreSQL connection pool...');
     await pgPool.end();
   } else if (sqliteDb) {
-    console.log('[Database] Closing SQLite database connection...');
     await new Promise((resolve) => sqliteDb.close(() => resolve()));
   }
 }

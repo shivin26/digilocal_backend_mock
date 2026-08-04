@@ -18,29 +18,21 @@ function loggerMiddleware(req, res, next) {
   res.setHeader('x-request-id', requestId);
   res.setHeader('x-correlation-id', correlationId);
 
-  // Log incoming HTTP Request
-  logger.info(`HTTP ${req.method} ${req.originalUrl || req.url}`, {
-    requestId,
-    correlationId,
-    method: req.method,
-    url: req.originalUrl || req.url,
-    ip: req.ip || req.connection?.remoteAddress,
-    userAgent: req.headers['user-agent']
-  });
-
-  // Intercept response finish event to log Response status & duration
+  // Intercept response finish event to log Response status & duration for errors/warnings
   res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    const logLevel = res.statusCode >= 500 ? 'error' : (res.statusCode >= 400 ? 'warn' : 'info');
+    if (res.statusCode >= 400) {
+      const duration = Date.now() - startTime;
+      const logLevel = res.statusCode >= 500 ? 'error' : 'warn';
 
-    logger[logLevel](`HTTP ${req.method} ${req.originalUrl || req.url} ${res.statusCode} - ${duration}ms`, {
-      requestId,
-      correlationId,
-      method: req.method,
-      url: req.originalUrl || req.url,
-      statusCode: res.statusCode,
-      responseTimeMs: duration
-    });
+      logger[logLevel](`HTTP ${req.method} ${req.originalUrl || req.url} ${res.statusCode} - ${duration}ms`, {
+        requestId,
+        correlationId,
+        method: req.method,
+        url: req.originalUrl || req.url,
+        statusCode: res.statusCode,
+        responseTimeMs: duration
+      });
+    }
   });
 
   next();
