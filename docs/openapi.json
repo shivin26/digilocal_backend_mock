@@ -1,0 +1,296 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DigiLocal Backend API Platform",
+    "description": "Production-grade RESTful API specification for DigiLocal local marketplace, vendor subscriptions, customer ordering, and admin management.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "DigiLocal Platform Engineering",
+      "email": "support@digilocal.in"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5001",
+      "description": "Local Development Server"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/vendors/register": {
+      "post": {
+        "summary": "Vendor Registration & Payment Submission",
+        "tags": ["Vendor Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/VendorRegisterRequest" },
+              "example": {
+                "society_id": 1,
+                "vendor_name": "Rajesh Sharma",
+                "email": "freshmart@gmail.com",
+                "password": "vendorPassword123",
+                "store_name": "FreshMart Grocery & Organic",
+                "phone_number": "9876543210",
+                "gst_number": "07AAACR12341Z5"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Vendor registered successfully",
+            "content": {
+              "application/json": {
+                "example": {
+                  "message": "Vendor registration & payment submitted successfully!",
+                  "vendor_id": 1,
+                  "vendor": {
+                    "vendor_id": 1,
+                    "society_id": 1,
+                    "vendor_name": "Rajesh Sharma",
+                    "store_name": "FreshMart Grocery & Organic",
+                    "email": "freshmart@gmail.com",
+                    "status": "PENDING"
+                  },
+                  "status": "PENDING",
+                  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/400Error" }
+        }
+      }
+    },
+    "/api/vendors/login": {
+      "post": {
+        "summary": "Vendor Login",
+        "tags": ["Vendor Authentication"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string" }
+                }
+              },
+              "example": {
+                "email": "freshmart@gmail.com",
+                "password": "vendor123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "example": {
+                  "message": "Login successful",
+                  "vendor": {
+                    "vendor_id": 1,
+                    "vendor_name": "Rajesh Sharma",
+                    "store_name": "FreshMart Grocery & Organic",
+                    "email": "freshmart@gmail.com",
+                    "status": "ACTIVE"
+                  },
+                  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/401Error" },
+          "429": { "description": "Too Many Requests / Account Lockout" }
+        }
+      }
+    },
+    "/api/societies": {
+      "get": {
+        "summary": "List All Societies",
+        "tags": ["Storefront & Societies"],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Filter by society name, location, or store name",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of active societies",
+            "content": {
+              "application/json": {
+                "example": [
+                  {
+                    "society_id": 1,
+                    "society_name": "Greenwood Residency",
+                    "location": "Block A, Sector 62, Noida",
+                    "vendor_count": 2
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders": {
+      "post": {
+        "summary": "Customer Places an Order",
+        "tags": ["Customer Orders"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateOrderRequest" },
+              "example": {
+                "customer_name": "Rahul Verma",
+                "phone_number": "9898989898",
+                "address": "Flat 402, Tower B, Greenwood Residency",
+                "vendor_id": 1,
+                "items": [
+                  { "item_id": 1, "quantity": 1, "unit_price": 68.00 },
+                  { "item_id": 2, "quantity": 1, "unit_price": 240.00 }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order created successfully",
+            "content": {
+              "application/json": {
+                "example": {
+                  "message": "Order placed successfully",
+                  "order_id": 1,
+                  "total_amount": 308.00,
+                  "status": "PLACED"
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/400Error" }
+        }
+      }
+    },
+    "/api/vendorPanel/{vendorId}": {
+      "get": {
+        "summary": "Get Full Vendor Dashboard Data",
+        "tags": ["Vendor Dashboard"],
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "vendorId", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vendor dashboard details",
+            "content": {
+              "application/json": {
+                "example": {
+                  "vendor": { "vendor_id": 1, "store_name": "FreshMart Grocery & Organic" },
+                  "items": [],
+                  "orders": [],
+                  "subscription": { "status": "ACTIVE" },
+                  "payments": []
+                }
+              }
+            }
+          },
+          "403": { "$ref": "#/components/responses/403Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter JWT Access Token"
+      }
+    },
+    "schemas": {
+      "VendorRegisterRequest": {
+        "type": "object",
+        "required": ["society_id", "vendor_name", "email", "password", "store_name"],
+        "properties": {
+          "society_id": { "type": "integer" },
+          "vendor_name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 6 },
+          "store_name": { "type": "string" },
+          "phone_number": { "type": "string" },
+          "gst_number": { "type": "string" }
+        }
+      },
+      "CreateOrderRequest": {
+        "type": "object",
+        "required": ["customer_name", "phone_number", "address", "vendor_id", "items"],
+        "properties": {
+          "customer_name": { "type": "string" },
+          "phone_number": { "type": "string" },
+          "address": { "type": "string" },
+          "vendor_id": { "type": "integer" },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["item_id", "quantity"],
+              "properties": {
+                "item_id": { "type": "integer" },
+                "quantity": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "400Error": {
+        "description": "Validation Error",
+        "content": {
+          "application/json": {
+            "example": {
+              "error": "Validation Error: Invalid email address format",
+              "details": [{ "field": "email", "message": "Invalid email address format" }]
+            }
+          }
+        }
+      },
+      "401Error": {
+        "description": "Unauthorized Access",
+        "content": {
+          "application/json": {
+            "example": { "error": "Unauthorized: Access token is missing or invalid" }
+          }
+        }
+      },
+      "403Error": {
+        "description": "Forbidden Access / IDOR Guard Violation",
+        "content": {
+          "application/json": {
+            "example": { "error": "Forbidden: You do not have permission to access this vendor resource" }
+          }
+        }
+      }
+    }
+  }
+}
