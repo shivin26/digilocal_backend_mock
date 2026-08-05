@@ -1,52 +1,53 @@
-# 🏪 DigiLocal Vendor Mobile App - Complete API Documentation
+# 🏪 DigiLocal Vendor Mobile App - Complete API Integration Handbook
 
-This document is a complete, production-ready API integration guide specifically created for **Vendor App Developers** (React Native, Flutter, iOS, Android, Web). It covers authentication, catalog management (CRUD), order management, dashboard analytics, and store settings.
+This API handbook is prepared specifically for **Vendor Mobile App Frontend Developers** (React Native, Flutter, iOS, Android, or Web). It documents all REST endpoints, request/response schemas, dual JWT authentication headers, error codes, and TypeScript interfaces needed to build the vendor mobile application.
 
 ---
 
-## 🌐 1. Server Connection & Base URLs
+## 🌐 1. Base URL & Environments
 
-Depending on your development setup, set your HTTP Client Base URL:
+Configure your HTTP Client (Axios / Fetch) base URL:
 
 | Environment | Base URL |
 | :--- | :--- |
-| **Local PC / Web** | `http://localhost:5000` |
+| **Local Web / PC** | `http://localhost:5000` |
 | **Android Emulator** | `http://10.0.2.2:5000` |
-| **Physical Phone (Same Wi-Fi)** | `http://172.25.12.195:5000` |
-| **Render Live Database / Production** | `https://your-backend-app.onrender.com` |
+| **Physical Mobile Device (Same Wi-Fi)** | `http://<your-local-ip>:5000` |
+| **Render PostgreSQL Backend (Live)** | `https://digilocal-backend-mock.onrender.com` |
 
-- **Interactive Swagger Documentation:** `http://172.25.12.195:5000/api-docs`
+- **Interactive Swagger OpenAPI Docs:** `http://localhost:5000/api-docs`
 
 ---
 
-## 🔐 2. Authentication & Header Rules
+## 🔐 2. Authentication & Header Conventions
 
-### Request Headers
-For all protected Vendor Panel endpoints, include the `Authorization` header:
+### HTTP Request Headers
+For all protected Vendor endpoints, attach the JWT `Authorization` header:
 
 ```http
 Authorization: Bearer <accessToken>
 Content-Type: application/json
 ```
 
-### Dual JWT Token Architecture
-1. Upon successful `POST /api/vendors/login` or `POST /api/vendors/register`, store both:
-   - `accessToken` (Short-lived JWT)
-   - `refreshToken` (Long-lived JWT stored in SecureStorage/Keychain)
+### Dual Session JWT Architecture
+1. On successful `POST /api/vendors/login` or `POST /api/vendors/register`, store both `accessToken` (Short-lived) and `refreshToken` (Long-lived in SecureStore/Keychain).
 2. When receiving `HTTP 401 Unauthorized`:
    - Call `POST /api/vendors/refresh` with `{ "refreshToken": "<stored_refresh_token>" }`.
-   - Update `accessToken` and retry the request.
+   - Save the new `accessToken` and retry the failed request automatically.
 
 ---
 
-## 📋 3. Vendor Data Models (TypeScript Interfaces)
+## 📦 3. Data Models (TypeScript Interfaces)
 
 ```typescript
-export interface Society {
+export interface HousingSociety {
   society_id: number;
   society_name: string;
   location: string;
-  vendor_count?: number;
+  pincode: string;
+  total_flats: number;
+  rwa_phone?: string;
+  image_url?: string;
 }
 
 export interface VendorProfile {
@@ -57,12 +58,16 @@ export interface VendorProfile {
   email: string;
   phone_number: string;
   gst_number: string;
+  opening_time: string;
+  closing_time: string;
   logo: string;
   description: string;
+  min_order_value?: number;
+  delivery_charge?: number;
   status: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'EXPIRED';
 }
 
-export interface CatalogItem {
+export interface ProductItem {
   item_id: number;
   vendor_id: number;
   item_name: string;
@@ -72,52 +77,95 @@ export interface CatalogItem {
   category: string;
   unit: string; // e.g. "kg", "packet", "piece", "liter"
   is_available: boolean | number;
+  in_stock: boolean | number;
   image_url: string;
 }
 
-export interface CustomerOrderItem {
-  item_id: number;
+export interface OrderItem {
+  item_id?: number;
   item_name: string;
   quantity: number;
   price: number;
 }
 
-export interface CustomerOrder {
-  order_id: number;
+export interface VendorOrder {
+  order_id: string;
+  user_id: string;
   customer_name: string;
-  customer_phone: string;
-  customer_address: string;
+  phone: string;
+  delivery_address: string;
   total_amount: number;
-  status: 'PENDING' | 'ACCEPTED' | 'DELIVERED' | 'CANCELLED';
+  status: 'PENDING' | 'ACCEPTED' | 'CONFIRMED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED';
   created_at: string;
-  items: CustomerOrderItem[];
+  items: OrderItem[];
 }
 ```
 
 ---
 
-## 🛠️ 4. Vendor API Endpoints Reference
+## 🚀 4. API Endpoints Reference
 
 ---
 
 ### 🏛️ 4.1 Onboarding: Fetch & Add Housing Societies
 
-#### Get Societies List
+#### 1. List Housing Societies
 - **Endpoint:** `GET /api/societies`
 - **Auth:** Public
-- **Description:** Retrieve available housing societies to populate society dropdown during vendor registration.
-- **Query Params:** `?search=sunshine` (Optional)
+- **Description:** Populates the society selection dropdown during vendor registration.
+- **Response `200 OK`:**
+```json
+[
+  {
+    "society_id": 1,
+    "society_name": "Omaxe Greenwood Residency",
+    "location": "Sector Greenwood, Omega II, Greater Noida",
+    "pincode": "201310",
+    "total_flats": 850,
+    "vendor_count": 2,
+    "image_url": "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800"
+  }
+]
+```
 
-#### Create New Society
+#### 2. Onboard New Housing Society
 - **Endpoint:** `POST /api/societies`
-- **Auth:** Required (`Bearer <accessToken>`)
-- **Request Body:** `{ "society_name": "Sunshine Heights", "location": "Sector 62, Noida" }`
-- **Response `201 Created`:** `{ "message": "Society created successfully", "society_id": 5 }`
-- **Error `400 Bad Request` (Duplicate Name):** `{ "error": "A society named \"Sunshine Heights\" already exists. Please choose a different name." }`
+- **Auth:** Public
+- **Request Body:**
+```json
+{
+  "society_name": "Godrej Woods Community",
+  "location": "Sector 43, Noida",
+  "pincode": "201301",
+  "total_flats": 450,
+  "rwa_phone": "9876543210"
+}
+```
+- **Response `201 Created`:**
+```json
+{
+  "message": "Society onboarding request created successfully",
+  "society_id": 5,
+  "society": {
+    "society_id": 5,
+    "society_name": "Godrej Woods Community",
+    "location": "Sector 43, Noida",
+    "status": "APPROVED"
+  }
+}
+```
+- **Error `400 Bad Request` (Duplicate Name):**
+```json
+{
+  "error": "A society named \"Godrej Woods Community\" already exists."
+}
+```
 
 ---
 
-### 🔑 4.2 Vendor Account Registration & Payment Submission
+### 🔑 4.2 Vendor Registration & Login
+
+#### 1. Vendor Account Registration
 - **Endpoint:** `POST /api/vendors/register`
 - **Auth:** Public
 - **Request Body:**
@@ -126,8 +174,8 @@ export interface CustomerOrder {
   "society_id": 1,
   "vendor_name": "Rajesh Sharma",
   "email": "freshmart@gmail.com",
-  "password": "VendorSecretPassword123",
-  "store_name": "FreshMart Grocery Store",
+  "password": "VendorPassword123",
+  "store_name": "FreshMart Grocery & Organic",
   "phone_number": "9876543210",
   "gst_number": "07AAACR12341Z5",
   "payment_method": "Razorpay (UPI)",
@@ -137,32 +185,28 @@ export interface CustomerOrder {
 - **Response `201 Created`:**
 ```json
 {
-  "message": "Vendor registration & payment submitted successfully!",
+  "message": "Vendor registration submitted successfully",
   "vendor_id": 1,
   "vendor": {
     "vendor_id": 1,
-    "society_id": 1,
+    "store_name": "FreshMart Grocery & Organic",
     "vendor_name": "Rajesh Sharma",
-    "store_name": "FreshMart Grocery Store",
     "email": "freshmart@gmail.com",
-    "status": "PENDING"
+    "status": "ACTIVE"
   },
-  "status": "PENDING",
   "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
----
-
-### 🔐 4.3 Vendor Login
+#### 2. Vendor Account Login
 - **Endpoint:** `POST /api/vendors/login`
-- **Auth:** Public (Protected by Brute-Force Rate Limiter)
+- **Auth:** Public (Rate-limited against brute-force)
 - **Request Body:**
 ```json
 {
   "email": "freshmart@gmail.com",
-  "password": "VendorSecretPassword123"
+  "password": "VendorPassword123"
 }
 ```
 - **Response `200 OK`:**
@@ -171,79 +215,39 @@ export interface CustomerOrder {
   "message": "Login successful",
   "vendor": {
     "vendor_id": 1,
-    "society_id": 1,
+    "store_name": "FreshMart Grocery & Organic",
     "vendor_name": "Rajesh Sharma",
-    "store_name": "FreshMart Grocery Store",
     "email": "freshmart@gmail.com",
+    "phone_number": "9876543210",
+    "society_id": 1,
     "status": "ACTIVE"
   },
   "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
-- **Error Responses:**
-  - `401 Unauthorized`: `{ "error": "Invalid email or password" }`
-  - `403 Forbidden`: `{ "error": "Access Denied: Your vendor application was rejected by DigiLocal Admin.", "status": "REJECTED" }`
-  - `429 Too Many Requests`: `{ "error": "Account temporarily locked due to repeated failed login attempts. Please try again in 15 minute(s).", "isLocked": true }`
 
----
-
-### 🔄 4.4 Refresh Access Token
+#### 3. Refresh Access Token
 - **Endpoint:** `POST /api/vendors/refresh`
 - **Auth:** Public
-- **Request Body:**
-```json
-{
-  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-- **Response `200 OK`:**
-```json
-{
-  "message": "Access token refreshed successfully",
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
+- **Request Body:** `{ "refreshToken": "<stored_refresh_token>" }`
+- **Response `200 OK`:** `{ "accessToken": "eyJhbGciOiJIUzI1Ni..." }`
 
 ---
 
-### 🚪 4.5 Vendor Logout
-- **Endpoint:** `POST /api/vendors/logout`
-- **Auth:** Required (`Bearer <accessToken>`)
-- **Request Body:** `{ "refreshToken": "..." }`
-- **Response `200 OK`:** `{ "message": "Logout successful, tokens revoked" }`
+### 🔑 4.3 Password Reset (OTP Workflow)
+
+1. **Request OTP:** `POST /api/vendors/forgot-password` ➔ `{ "email": "freshmart@gmail.com" }`
+2. **Verify OTP:** `POST /api/vendors/verify-otp` ➔ `{ "email": "freshmart@gmail.com", "otp": "849201" }`
+3. **Reset Password:** `POST /api/vendors/reset-password` ➔ `{ "email": "freshmart@gmail.com", "otp": "849201", "newPassword": "NewSecretPassword123" }`
 
 ---
 
-### 🔑 4.6 Password Reset Workflow (OTP)
+### 📊 4.4 Vendor Panel Dashboard
 
-#### Step 1: Request 6-Digit OTP
-- **Endpoint:** `POST /api/vendors/forgot-password`
-- **Request Body:** `{ "email": "freshmart@gmail.com" }`
-- **Response `200 OK`:**
-```json
-{
-  "message": "OTP sent successfully to registered email address",
-  "simulationOtp": "849201"
-}
-```
-
-#### Step 2: Verify OTP
-- **Endpoint:** `POST /api/vendors/verify-otp`
-- **Request Body:** `{ "email": "freshmart@gmail.com", "otp": "849201" }`
-- **Response `200 OK`:** `{ "message": "OTP verified successfully" }`
-
-#### Step 3: Set New Password
-- **Endpoint:** `POST /api/vendors/reset-password`
-- **Request Body:** `{ "email": "freshmart@gmail.com", "otp": "849201", "newPassword": "NewStrongPassword123" }`
-- **Response `200 OK`:** `{ "message": "Password reset successfully. You can now log in with your new password." }`
-
----
-
-### 📊 4.7 Get Full Vendor Dashboard Data
 - **Endpoint:** `GET /api/vendorPanel/:vendorId`
 - **Auth:** Required (`Bearer <accessToken>`)
-- **Description:** Returns store summary, entire product catalog, and incoming customer orders.
+- **Description:** Fetches vendor store profile, full catalog items array, and incoming customer orders.
 - **Response `200 OK`:**
 ```json
 {
@@ -251,35 +255,44 @@ export interface CustomerOrder {
     "vendor_id": 1,
     "society_id": 1,
     "vendor_name": "Rajesh Sharma",
-    "store_name": "FreshMart Grocery Store",
+    "store_name": "FreshMart Grocery & Organic",
     "email": "freshmart@gmail.com",
     "phone_number": "9876543210",
-    "gst_number": "07AAACR12341Z5",
+    "opening_time": "08:00 AM",
+    "closing_time": "10:00 PM",
     "status": "ACTIVE"
   },
   "items": [
     {
-      "item_id": 10,
+      "item_id": 101,
       "vendor_id": 1,
-      "item_name": "Aashirvaad Whole Wheat Atta 5kg",
-      "description": "100% pure wheat flour",
-      "price": 275.00,
+      "item_name": "Fresh Organic Milk (1L)",
+      "description": "Pure farm fresh whole cow milk pouch.",
+      "price": 68.00,
       "stock": 50,
-      "category": "Grocery",
-      "unit": "packet",
-      "is_available": 1,
-      "image_url": "https://images.unsplash.com/photo-1542838132-92c53300491e"
+      "category": "Dairy & Milk",
+      "unit": "1 Litre",
+      "is_available": true,
+      "in_stock": true,
+      "image_url": "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400"
     }
   ],
   "orders": [
     {
-      "order_id": 101,
-      "customer_name": "Ananya Roy",
-      "customer_phone": "9811223344",
-      "customer_address": "Flat 402, Tower B",
-      "total_amount": 550.00,
+      "order_id": "ORD-9843",
+      "customer_name": "Rahul Sharma",
+      "phone": "9876543210",
+      "delivery_address": "Tower A-402",
+      "total_amount": 180.00,
       "status": "PENDING",
-      "created_at": "2026-08-05T10:30:00Z"
+      "created_at": "2026-08-05T06:27:00.000Z",
+      "items": [
+        {
+          "item_name": "Fresh Butter 500g",
+          "quantity": 1,
+          "price": 180.00
+        }
+      ]
     }
   ]
 }
@@ -287,141 +300,124 @@ export interface CustomerOrder {
 
 ---
 
-### 📦 4.8 Product Catalog Management (CRUD)
+### 📦 4.5 Store Product Catalog Management (CRUD)
 
-#### ➕ Add New Product
-- **Endpoint:** `POST /api/vendorPanel/:vendorId/items`
+#### 1. Add Product Item
+- **Endpoint:** `POST /api/vendors/:vendorId/items` (or `/api/vendorPanel/:vendorId/items`)
 - **Auth:** Required (`Bearer <accessToken>`)
 - **Request Body:**
 ```json
 {
-  "item_name": "Amul Taza Toned Milk 1L",
-  "description": "Pasteurized toned milk pouch",
-  "price": 54.00,
-  "stock": 100,
-  "category": "Dairy",
-  "unit": "liter",
+  "item_name": "Fresh Paneer 200g",
+  "description": "Soft fresh dairy cottage cheese block",
+  "price": 90.00,
+  "category": "Dairy & Milk",
+  "stock": 30,
+  "unit": "200g",
   "is_available": true,
-  "image_url": "https://images.unsplash.com/photo-1550583724-b2692b85b150"
+  "image_url": "https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=400"
 }
 ```
 - **Response `201 Created`:**
 ```json
 {
   "message": "Item added successfully",
-  "item_id": 11
+  "item_id": 106,
+  "item": {
+    "item_id": 106,
+    "item_name": "Fresh Paneer 200g",
+    "price": 90.00,
+    "in_stock": true
+  }
 }
 ```
 
-#### ✏️ Update Product Details or Toggle Stock Availability
+#### 2. Update Product or Toggle In-Stock Status
 - **Endpoint:** `PUT /api/vendorPanel/:vendorId/items/:itemId`
 - **Auth:** Required (`Bearer <accessToken>`)
-- **Option A (Full Edit):**
+- **Request Body:**
 ```json
 {
-  "item_name": "Amul Taza Toned Milk 1L",
-  "description": "Pasteurized fresh milk",
-  "price": 56.00,
-  "stock": 80,
-  "category": "Dairy",
-  "unit": "liter",
-  "is_available": true,
-  "image_url": "https://images.unsplash.com/photo-1550583724-b2692b85b150"
-}
-```
-- **Option B (Stock Availability Toggle only):**
-```json
-{
+  "price": 95.00,
+  "stock": 25,
   "is_available": false
 }
 ```
 - **Response `200 OK`:** `{ "message": "Item updated successfully" }`
 
-#### 🗑️ Delete Product
+#### 3. Delete Product Item
 - **Endpoint:** `DELETE /api/vendorPanel/:vendorId/items/:itemId`
 - **Auth:** Required (`Bearer <accessToken>`)
 - **Response `200 OK`:** `{ "message": "Item deleted successfully" }`
 
 ---
 
-### 🚚 4.9 Vendor Order Management (Accept / Deliver / Cancel Order)
-- **Endpoint:** `PUT /api/orders/:orderId/status`
+### 🚚 4.6 Vendor Order Pipeline & Status Updates
+
+#### 1. Fetch Store Orders
+- **Endpoint:** `GET /api/orders/vendor/:vendorId`
+- **Auth:** Required (`Bearer <accessToken>`)
+- **Response `200 OK`:** Returns array of vendor orders with customer details and item lists.
+
+#### 2. Update Order Status
+- **Endpoint:** `PUT /api/orders/:id/status`
 - **Auth:** Required (`Bearer <accessToken>`)
 - **Request Body:**
 ```json
 {
-  "status": "ACCEPTED" 
+  "status": "CONFIRMED"
 }
 ```
-- **Allowed Status Options:**
-  - `"ACCEPTED"` (Vendor accepts incoming order)
-  - `"DELIVERED"` (Order completed & delivered to customer)
-  - `"CANCELLED"` (Vendor declines order)
+- **Supported Status Values:**
+  - `"ACCEPTED"` or `"CONFIRMED"` (Vendor accepts order)
+  - `"OUT_FOR_DELIVERY"` (Out for delivery within society)
+  - `"DELIVERED"` (Delivery completed)
+  - `"CANCELLED"` (Declined/Cancelled)
 - **Response `200 OK`:**
 ```json
 {
-  "message": "Order status updated",
-  "status": "ACCEPTED"
+  "message": "Order status updated successfully",
+  "order_id": "ORD-9843",
+  "status": "CONFIRMED"
 }
 ```
 
 ---
 
-### ⚙️ 4.10 Update Vendor Store Profile & Settings
+### ⚙️ 4.7 Update Vendor Store Settings
 - **Endpoint:** `PUT /api/vendorPanel/:vendorId/settings`
 - **Auth:** Required (`Bearer <accessToken>`)
 - **Request Body:**
 ```json
 {
-  "store_name": "FreshMart Organic & Supermarket",
+  "store_name": "FreshMart Grocery & Organic",
   "phone_number": "9876543210",
-  "gst_number": "07AAACR12341Z5",
-  "description": "Premium organic groceries delivered to your door",
-  "logo": "https://images.unsplash.com/photo-1534723452862-4c874018d66d"
+  "opening_time": "07:30 AM",
+  "closing_time": "10:30 PM",
+  "description": "Quality goods & daily essentials delivered warm to your flat."
 }
 ```
-- **Response `200 OK`:** `{ "message": "Store settings updated successfully", "logo": "..." }`
+- **Response `200 OK`:** `{ "message": "Store settings updated successfully" }`
 
 ---
 
-### 💳 4.11 Renew Annual Vendor Subscription
-- **Endpoint:** `POST /api/vendorPanel/:vendorId/renew`
-- **Auth:** Required (`Bearer <accessToken>`)
-- **Request Body:**
-```json
-{
-  "payment_method": "Razorpay (UPI)",
-  "transaction_id": "RAZORPAY_RENEW_881923"
-}
-```
-- **Response `200 OK`:**
-```json
-{
-  "message": "Subscription renewed successfully for 1 year!",
-  "start_date": "2026-08-05",
-  "end_date": "2027-08-05"
-}
-```
-
----
-
-## 📱 5. Production Vendor App API Client Implementation (TypeScript & Axios)
+## 📱 5. Production Axios API Client Snippet (TypeScript)
 
 ```typescript
 import axios from 'axios';
 
-// Replace with your local IP or production domain
-const BASE_URL = 'http://172.25.12.195:5000';
+// Set Base URL to your backend server
+const BASE_URL = 'http://localhost:5000'; // Or your Render live backend URL
 
-export const vendorApi = axios.create({
+export const vendorApiClient = axios.create({
   baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Auto-attach JWT Access Token
-vendorApi.interceptors.request.use(async (config) => {
+// Interceptor: Auto-attach JWT Access Token
+vendorApiClient.interceptors.request.use(async (config) => {
   const token = await getStoredToken('accessToken');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -429,9 +425,9 @@ vendorApi.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Automatic 401 Unauthorized Refresh Interceptor
-vendorApi.interceptors.response.use(
-  (res) => res,
+// Interceptor: Handle 401 Unauthorized via Refresh Token
+vendorApiClient.interceptors.response.use(
+  (response) => response,
   async (error) => {
     const originalRequest = error.config;
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -441,13 +437,13 @@ vendorApi.interceptors.response.use(
         if (!refreshToken) throw new Error('No refresh token');
 
         const { data } = await axios.post(`${BASE_URL}/api/vendors/refresh`, { refreshToken });
-        await saveStoredToken('accessToken', data.accessToken);
-        
+        await setStoredToken('accessToken', data.accessToken);
+
         originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
-        return vendorApi(originalRequest);
+        return vendorApiClient(originalRequest);
       } catch (err) {
-        await clearStoredTokens();
-        // Redirect to Vendor Login Screen
+        await clearTokens();
+        // Redirect to Login Screen
         return Promise.reject(err);
       }
     }

@@ -48,12 +48,6 @@ app.use(loggerMiddleware);
 
 const PORT = process.env.PORT || 5000;
 
-// ── Database Init ────────────────────────────────────────────
-initDb().catch(err => {
-    logger.error('Fatal Database initialization error', { error: err.message });
-    process.exit(1);
-});
-
 // ── OpenAPI 3.1 & Interactive Swagger UI Documentation ──────
 const openApiSpecPath = path.join(__dirname, 'docs', 'openapi.json');
 
@@ -161,21 +155,42 @@ app.use((err, req, res, next) => {
     });
 });
 
-// ── Start Cron Jobs ──────────────────────────────────────────
-startSubscriptionCron();
+// ── Database Init & Server Boot ──────────────────────────────
+async function bootServer() {
+    try {
+        await initDb();
 
-// ── Start Server ─────────────────────────────────────────────
-const server = app.listen(PORT, () => {
-    console.log(`DigiLocal Server running on PORT ${PORT} | Docs: http://localhost:${PORT}/api-docs`, { port: PORT });
-}).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        logger.error(`Port ${PORT} is already in use. Stop existing server or change PORT in .env`, { port: PORT });
-    } else {
-        logger.error('Server boot error', { error: err.message });
+        startSubscriptionCron();
+
+        const server = app.listen(PORT, () => {
+            console.log(`DigiLocal Server running on PORT ${PORT} | Docs: http://localhost:${PORT}/api-docs`, { port: PORT });
+        }).on('error', (err) => {
+            if (err.code === 'EADDRINUSE') {
+                logger.error(`Port ${PORT} is already in use. Stop existing server or change PORT in .env`, { port: PORT });
+            } else {
+                logger.error('Server boot error', { error: err.message });
+            }
+        });
+
+        const gracefulShutdown = (signal) => {
+            logger.info(`Received ${signal}. Initiating graceful shutdown...`, { signal });
+            server.close(async () => {
+                logger.info('HTTP server closed.');
+                await closeDb();
+                logger.info('Database connections closed cleanly. Shutdown complete.');
+                process.exit(0);
+            });
+        };
+
+        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    } catch (err) {
+        logger.error('Fatal Database initialization error', { error: err.message });
+        process.exit(1);
     }
-});
+}
 
-// ── Uncaught Exception & Process Lifecycle Handlers ───────────
+// ── Uncaught Exception Handlers ──────────────────────────────
 process.on('unhandledRejection', (reason, promise) => {
     logger.error('Unhandled Rejection at Promise', { reason: reason?.message || reason });
 });
@@ -184,15 +199,4 @@ process.on('uncaughtException', (err) => {
     logger.error('Uncaught Exception thrown', { error: err.message, stack: err.stack });
 });
 
-const gracefulShutdown = (signal) => {
-    logger.info(`Received ${signal}. Initiating graceful shutdown...`, { signal });
-    server.close(async () => {
-        logger.info('HTTP server closed.');
-        await closeDb();
-        logger.info('Database connections closed cleanly. Shutdown complete.');
-        process.exit(0);
-    });
-};
-
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+bootServer();

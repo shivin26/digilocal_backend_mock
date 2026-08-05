@@ -129,16 +129,22 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
 
         const vendorRes = await query(
             `INSERT INTO vendors (society_id, vendor_name, gst_number, phone_number, email, password, password_hash, store_name, logo, description, status) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE') RETURNING *`,
             [society_id || 1, vendor_name, gst_number || '', phone_number || '', email, hashedPassword, hashedPassword, store_name, defaultLogo, defaultDesc]
         );
-        const vendor_id = Number(vendorRes.insertId);
+        const newVendorRow = vendorRes.rows[0] || {};
+        const vendor_id = Number(newVendorRow.vendor_id || vendorRes.insertId);
+
+        if (!vendor_id || isNaN(vendor_id)) {
+            throw new Error('Failed to obtain vendor ID during registration');
+        }
 
         const subRes = await query(
-            `INSERT INTO subscriptions (vendor_id, start_date, end_date, status) VALUES (?, NULL, NULL, 'ACTIVE')`,
+            `INSERT INTO subscriptions (vendor_id, start_date, end_date, status) VALUES (?, CURRENT_DATE, CURRENT_DATE + INTERVAL '1 year', 'ACTIVE') RETURNING *`,
             [vendor_id]
         );
-        const subscription_id = subRes.insertId;
+        const subRow = subRes.rows[0] || {};
+        const subscription_id = subRow.subscription_id || subRow.id || subRes.insertId;
 
         const txnId = transaction_id || `RAZORPAY_${Date.now()}_${vendor_id}`;
         const payMethod = payment_method || 'Razorpay (UPI)';

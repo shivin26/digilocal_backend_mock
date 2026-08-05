@@ -10,8 +10,8 @@ function validateEnv() {
 
   const warnings = [];
 
-  if (!process.env.DATABASE_URL) {
-    warnings.push('No Render PostgreSQL database URL configured in DATABASE_URL. Using SQLite fallback.');
+  if (!process.env.DATABASE_URL && !process.env.PGHOST) {
+    warnings.push('CRITICAL: No PostgreSQL configuration found in DATABASE_URL or PGHOST.');
   }
 
   if (!process.env.JWT_SECRET) {
