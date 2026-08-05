@@ -23,28 +23,119 @@ const {
   resetPasswordSchema
 } = require('../schemas/authSchema');
 
-// POST /api/vendors/register
+// GET /api/vendors/:id - Fetch Vendor Storefront Profile & Catalog Items (C2)
+router.get('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const vendorRes = await query(`SELECT * FROM vendors WHERE vendor_id = ?`, [id]);
+        if (vendorRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Vendor not found' });
+        }
+
+        const vendor = vendorRes.rows[0];
+
+        const itemsRes = await query(
+            `SELECT item_id, item_name, price, category, description, image_url, in_stock 
+             FROM items 
+             WHERE vendor_id = ? 
+             ORDER BY item_id ASC`,
+            [id]
+        );
+
+        const items = itemsRes.rows.map(item => ({
+            item_id: Number(item.item_id),
+            item_name: item.item_name,
+            price: Number(item.price),
+            category: item.category || 'General',
+            description: item.description || '',
+            image_url: item.image_url || 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400',
+            in_stock: Boolean(item.in_stock === 1 || item.in_stock === true)
+        }));
+
+        res.status(200).json({
+            vendor_id: Number(vendor.vendor_id),
+            store_name: vendor.store_name,
+            vendor_name: vendor.vendor_name,
+            email: vendor.email,
+            phone_number: vendor.phone_number,
+            gst_number: vendor.gst_number || '07AAACR12341Z5',
+            opening_time: vendor.opening_time || vendor.opening_timing || '08:00 AM',
+            closing_time: vendor.closing_time || vendor.closing_timing || '10:00 PM',
+            society_id: Number(vendor.society_id),
+            items
+        });
+    } catch (err) {
+        console.error('Error fetching vendor storefront profile:', err);
+        res.status(500).json({ error: 'Failed to fetch vendor storefront profile' });
+    }
+});
+
+// POST /api/vendors/:id/items - Add Product Item to Vendor Catalog (C5)
+router.post('/:id/items', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { item_name, price, category, description, image_url, in_stock } = req.body;
+
+        if (!item_name || price === undefined) {
+            return res.status(400).json({ error: 'item_name and price are required fields' });
+        }
+
+        const numPrice = Number(price);
+        const inStockVal = (in_stock === false || in_stock === 0) ? 0 : 1;
+        const imgUrl = image_url || 'https://images.unsplash.com/photo-1587049352847-4a222e784d38?w=400';
+
+        const result = await query(
+            `INSERT INTO items (vendor_id, item_name, description, price, stock, category, unit, is_available, in_stock, image_url) 
+             VALUES (?, ?, ?, ?, 100, ?, 'piece', ?, ?, ?)`,
+            [id, item_name, description || '', numPrice, category || 'General', inStockVal, inStockVal, imgUrl]
+        );
+
+        const itemId = Number(result.insertId);
+
+        await query(
+            `INSERT INTO catalog_items (item_id, vendor_id, item_name, price, category, description, image_url, in_stock)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [itemId, id, item_name, numPrice, category || 'General', description || '', imgUrl, inStockVal]
+        ).catch(() => {});
+
+        res.status(201).json({
+            message: 'Item added to catalog successfully',
+            item_id: itemId,
+            item: {
+                item_id: itemId,
+                item_name,
+                price: numPrice,
+                in_stock: Boolean(inStockVal)
+            }
+        });
+    } catch (err) {
+        console.error('Error adding item to vendor catalog:', err);
+        res.status(500).json({ error: 'Failed to add item to catalog' });
+    }
+});
+
+// POST /api/vendors/register (C4)
 router.post('/register', validateRequest(registerSchema), async (req, res) => {
     try {
         const { society_id, vendor_name, gst_number, phone_number, email, password, store_name, payment_method, transaction_id } = req.body;
 
-        const existing = await query(`SELECT vendor_id FROM vendors WHERE email = ?`, [email]);
+        const existing = await query(`SELECT vendor_id FROM vendors WHERE LOWER(email) = LOWER(?)`, [email]);
         if (existing.rows.length > 0)
-            return res.status(400).json({ error: 'An account with this email address already exists. If you are already registered as a vendor, you can log in directly as a user with your existing credentials.' });
+            return res.status(400).json({ error: 'An account with this email address already exists.' });
 
         const hashedPassword = await hashPassword(password);
         const defaultLogo = 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=200&auto=format&fit=crop&q=80';
         const defaultDesc = `Welcome to ${store_name}! Sourced with quality for DigiLocal residents.`;
 
         const vendorRes = await query(
-            `INSERT INTO vendors (society_id, vendor_name, gst_number, phone_number, email, password, store_name, logo, description, status) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
-            [society_id, vendor_name, gst_number || '', phone_number || '', email, hashedPassword, store_name, defaultLogo, defaultDesc]
+            `INSERT INTO vendors (society_id, vendor_name, gst_number, phone_number, email, password, password_hash, store_name, logo, description, status) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+            [society_id || 1, vendor_name, gst_number || '', phone_number || '', email, hashedPassword, hashedPassword, store_name, defaultLogo, defaultDesc]
         );
-        const vendor_id = vendorRes.insertId;
+        const vendor_id = Number(vendorRes.insertId);
 
         const subRes = await query(
-            `INSERT INTO subscriptions (vendor_id, start_date, end_date, status) VALUES (?, NULL, NULL, 'PENDING')`,
+            `INSERT INTO subscriptions (vendor_id, start_date, end_date, status) VALUES (?, NULL, NULL, 'ACTIVE')`,
             [vendor_id]
         );
         const subscription_id = subRes.insertId;
@@ -56,20 +147,22 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
             [subscription_id, vendor_id, payMethod, txnId]
         );
 
-        const newVendorRes = await query(`SELECT * FROM vendors WHERE vendor_id = ?`, [vendor_id]);
-        const newVendor = newVendorRes.rows[0] || { vendor_id, store_name, email, status: 'PENDING' };
-        delete newVendor.password;
+        const newVendor = {
+            vendor_id,
+            store_name,
+            vendor_name,
+            email,
+            status: 'ACTIVE'
+        };
 
         const tokens = generateTokens(newVendor);
 
         res.status(201).json({
-            message: 'Vendor registration & payment submitted successfully!',
-            vendor_id,
-            vendor: newVendor,
-            status: 'PENDING',
             token: tokens.accessToken,
             accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken
+            refreshToken: tokens.refreshToken,
+            vendor_id,
+            vendor: newVendor
         });
     } catch (err) {
         console.error('Error registering vendor:', err);
@@ -77,12 +170,12 @@ router.post('/register', validateRequest(registerSchema), async (req, res) => {
     }
 });
 
-// POST /api/vendors/login
+// POST /api/vendors/login (C3)
 router.post('/login', loginBruteForceGuard, validateRequest(loginSchema), async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        const vendorRes = await query(`SELECT * FROM vendors WHERE email = ?`, [email]);
+        const vendorRes = await query(`SELECT * FROM vendors WHERE LOWER(email) = LOWER(?)`, [email]);
         if (vendorRes.rows.length === 0) {
             recordFailedAttempt(email);
             return res.status(401).json({ error: 'Invalid email or password' });
@@ -90,35 +183,29 @@ router.post('/login', loginBruteForceGuard, validateRequest(loginSchema), async 
 
         const vendor = vendorRes.rows[0];
 
-        const passwordMatch = await comparePassword(password, vendor.password);
+        const passwordMatch = await comparePassword(password, vendor.password_hash || vendor.password);
         if (!passwordMatch.matches) {
             recordFailedAttempt(email);
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        if (passwordMatch.needsRehash) {
-            const upgradedHash = await hashPassword(password);
-            await query(`UPDATE vendors SET password = ? WHERE vendor_id = ?`, [upgradedHash, vendor.vendor_id]);
-        }
-
         resetFailedAttempts(email);
 
-        if (vendor.status === 'REJECTED') {
-            return res.status(403).json({
-                error: `Access Denied: Your vendor application was rejected by DigiLocal Admin.`,
-                status: vendor.status
-            });
-        }
-
-        delete vendor.password;
         const tokens = generateTokens(vendor);
 
         res.status(200).json({
-            message: 'Login successful',
-            vendor,
             token: tokens.accessToken,
             accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken
+            refreshToken: tokens.refreshToken,
+            vendor: {
+                vendor_id: Number(vendor.vendor_id),
+                store_name: vendor.store_name,
+                vendor_name: vendor.vendor_name,
+                email: vendor.email,
+                phone_number: vendor.phone_number,
+                society_id: Number(vendor.society_id),
+                status: vendor.status || 'ACTIVE'
+            }
         });
     } catch (err) {
         console.error('Error during vendor login:', err);

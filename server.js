@@ -14,8 +14,8 @@ const logger = require('./utils/logger');
 // ── Startup Environment Check ────────────────────────────────
 validateEnv();
 
-// ── Route Modules ────────────────────────────────────────────
 const healthRouter = require('./routes/health');
+const usersRouter = require('./routes/users');
 const societiesRouter = require('./routes/societies');
 const storefrontRouter = require('./routes/storefront');
 const ordersRouter = require('./routes/orders');
@@ -110,9 +110,9 @@ app.get('/version', (req, res) => res.redirect('/health/version'));
 // ── Mount Business Routes ────────────────────────────────────
 app.use('/api/societies', societiesRouter);   // Society management
 app.use('/api', storefrontRouter);            // Storefront APIs
-app.use('/api/orders', ordersRouter);         // Customer orders
+app.use('/api/users', usersRouter);           // Resident user auth
 app.use('/api/vendors', vendorAuthRouter);    // Vendor auth
-app.use('/api/users', vendorAuthRouter);      // User auth (Vendors logging in as users)
+app.use('/api/orders', ordersRouter);         // Customer orders
 app.use('/api/vendorPanel', vendorPanelRouter); // Vendor dashboard
 app.use('/api/admin', adminRouter);           // Admin portal
 
@@ -166,7 +166,7 @@ startSubscriptionCron();
 
 // ── Start Server ─────────────────────────────────────────────
 const server = app.listen(PORT, () => {
-    logger.info(`DigiLocal Server running on PORT ${PORT} | Health: http://localhost:${PORT}/health | Docs: http://localhost:${PORT}/api-docs`, { port: PORT });
+    console.log(`DigiLocal Server running on PORT ${PORT} | Docs: http://localhost:${PORT}/api-docs`, { port: PORT });
 }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
         logger.error(`Port ${PORT} is already in use. Stop existing server or change PORT in .env`, { port: PORT });

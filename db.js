@@ -47,7 +47,9 @@ async function initDb() {
   const pgConnectionString = process.env.DATABASE_URL || process.env.PG_URI;
   const pgHost = process.env.PGHOST;
 
-  if (pgConnectionString || (pgHost && pgHost !== 'localhost')) {
+  const usePostgres = process.env.USE_POSTGRES === 'true' || Boolean(pgConnectionString) || Boolean(pgHost);
+
+  if (usePostgres) {
     try {
       const isCloudOrRender = pgConnectionString && (
         pgConnectionString.includes('render.com') ||
@@ -58,18 +60,27 @@ async function initDb() {
 
       const sslOption = isCloudOrRender ? { rejectUnauthorized: false } : undefined;
 
-      pgPool = new Pool({
-        connectionString: pgConnectionString,
-        host: process.env.PGHOST || 'localhost',
-        port: parseInt(process.env.PGPORT || '5432', 10),
-        user: process.env.PGUSER || 'postgres',
-        password: process.env.PGPASSWORD || 'postgres',
-        database: process.env.PGDATABASE || 'digilocal',
-        ssl: sslOption,
-        max: 20, // Production connection limit
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000
-      });
+      const poolConfig = pgConnectionString
+        ? {
+            connectionString: pgConnectionString,
+            ssl: sslOption,
+            max: 20,
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: 5000
+          }
+        : {
+            host: process.env.PGHOST || 'localhost',
+            port: parseInt(process.env.PGPORT || '5432', 10),
+            user: process.env.PGUSER || 'postgres',
+            password: process.env.PGPASSWORD || 'postgres',
+            database: process.env.PGDATABASE || 'digilocal',
+            ssl: sslOption,
+            max: 20,
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: 5000
+          };
+
+      pgPool = new Pool(poolConfig);
 
       // Handle background client errors cleanly
       pgPool.on('error', (err) => {
@@ -105,7 +116,7 @@ async function initDb() {
     });
   });
 
-  console.log('[Database] Connected to SQLite database successfully.');
+  console.log('Connected to SQLite database successfully.');
 
   await setupTablesSqlite();
   await createIndexes();
@@ -126,7 +137,7 @@ function query(sqlText, params = []) {
       if (/^INSERT\s+INTO/i.test(trimmed) && !/RETURNING/i.test(trimmed)) {
         pgSql += ' RETURNING *';
       }
-      
+
       pgPool.query(pgSql, params, (err, result) => {
         if (err) {
           console.error('[DB Query Error - PostgreSQL]:', err.message, '| Query:', sqlText);
@@ -227,7 +238,7 @@ async function withTransaction(callback) {
       await query('COMMIT');
       return result;
     } catch (err) {
-      try { await query('ROLLBACK'); } catch (_) {}
+      try { await query('ROLLBACK'); } catch (_) { }
       throw err;
     }
   }
@@ -272,6 +283,13 @@ async function setupTablesPg() {
 
   // Safe column migration for existing PostgreSQL databases
   const columns = [
+    `ALTER TABLE societies ADD COLUMN IF NOT EXISTS pincode VARCHAR(10) DEFAULT '201310'`,
+    `ALTER TABLE societies ADD COLUMN IF NOT EXISTS total_flats INT DEFAULT 850`,
+    `ALTER TABLE societies ADD COLUMN IF NOT EXISTS rwa_phone VARCHAR(20) DEFAULT '9876543210'`,
+    `ALTER TABLE societies ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800'`,
+    `ALTER TABLE societies ADD COLUMN IF NOT EXISTS banner_image TEXT DEFAULT 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=1200'`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS opening_time VARCHAR(20) DEFAULT '08:00 AM'`,
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS closing_time VARCHAR(20) DEFAULT '10:00 PM'`,
     `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS opening_timing VARCHAR(20) DEFAULT '08:00 AM'`,
     `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS closing_timing VARCHAR(20) DEFAULT '10:00 PM'`,
     `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS min_order_value DECIMAL(10,2) DEFAULT 0.00`,
@@ -279,12 +297,21 @@ async function setupTablesPg() {
     `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS delivery_charge DECIMAL(10,2) DEFAULT 0.00`,
     `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gst_percentage DECIMAL(5,2) DEFAULT 5.00`,
     `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS service_charge_percentage DECIMAL(5,2) DEFAULT 0.00`,
-    `ALTER TABLE societies ADD COLUMN IF NOT EXISTS public_id VARCHAR(10)`,
-    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS public_id VARCHAR(10)`
+    `ALTER TABLE vendors ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)`,
+    `ALTER TABLE orders ALTER COLUMN order_id TYPE VARCHAR(100) USING order_id::text`,
+    `ALTER TABLE order_details ALTER COLUMN order_id TYPE VARCHAR(100) USING order_id::text`,
+    `ALTER TABLE order_details ADD COLUMN IF NOT EXISTS item_name VARCHAR(255)`,
+    `ALTER TABLE order_details ADD COLUMN IF NOT EXISTS price DECIMAL(10,2)`,
+    `ALTER TABLE items ADD COLUMN IF NOT EXISTS in_stock BOOLEAN DEFAULT TRUE`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_id VARCHAR(100)`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS society_id INT`,
+    `ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT`
   ];
 
   for (const colSql of columns) {
-    try { await pgPool.query(colSql); } catch (_) {}
+    try { await pgPool.query(colSql); } catch (_) { }
   }
 
   // Backfill public_id if missing
@@ -311,7 +338,25 @@ async function setupTablesSqlite() {
       society_id INTEGER PRIMARY KEY AUTOINCREMENT,
       society_name TEXT NOT NULL,
       location TEXT NOT NULL,
+      pincode TEXT DEFAULT '201310',
+      total_flats INTEGER DEFAULT 850,
+      rwa_phone TEXT DEFAULT '9876543210',
+      image_url TEXT DEFAULT 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800',
+      banner_image TEXT DEFAULT 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=1200',
       public_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      user_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      phone TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      society_id INTEGER REFERENCES societies(society_id),
+      flat TEXT,
+      joined_date TEXT,
+      avatar TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -323,26 +368,21 @@ async function setupTablesSqlite() {
       phone_number TEXT,
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
+      password_hash TEXT,
       store_name TEXT NOT NULL,
-      logo TEXT DEFAULT 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=200&auto=format&fit=crop&q=80',
-      description TEXT DEFAULT 'Welcome to our store on DigiLocal!',
+      opening_time TEXT DEFAULT '08:00 AM',
+      closing_time TEXT DEFAULT '10:00 PM',
       opening_timing TEXT DEFAULT '08:00 AM',
       closing_timing TEXT DEFAULT '10:00 PM',
+      logo TEXT DEFAULT 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=200&auto=format&fit=crop&q=80',
+      description TEXT DEFAULT 'Quality goods & daily essentials delivered within society via WhatsApp.',
       min_order_value REAL DEFAULT 0.00,
       max_quantity_limit INTEGER DEFAULT 10,
       delivery_charge REAL DEFAULT 0.00,
       gst_percentage REAL DEFAULT 5.00,
       service_charge_percentage REAL DEFAULT 0.00,
-      status TEXT DEFAULT 'PENDING',
+      status TEXT DEFAULT 'ACTIVE',
       public_id TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS customers (
-      customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      customer_name TEXT NOT NULL,
-      phone_number TEXT NOT NULL,
-      address TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -356,26 +396,45 @@ async function setupTablesSqlite() {
       category TEXT DEFAULT 'General',
       unit TEXT DEFAULT 'piece',
       is_available INTEGER DEFAULT 1,
+      in_stock INTEGER DEFAULT 1,
       image_url TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    CREATE TABLE IF NOT EXISTS orders (
-      order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    CREATE TABLE IF NOT EXISTS catalog_items (
+      item_id INTEGER PRIMARY KEY AUTOINCREMENT,
       vendor_id INTEGER REFERENCES vendors(vendor_id) ON DELETE CASCADE,
-      customer_id INTEGER REFERENCES customers(customer_id) ON DELETE CASCADE,
+      item_name TEXT NOT NULL,
+      price REAL NOT NULL,
+      category TEXT,
+      description TEXT,
+      image_url TEXT,
+      in_stock INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      order_id TEXT PRIMARY KEY,
+      user_id TEXT,
+      vendor_id INTEGER REFERENCES vendors(vendor_id) ON DELETE CASCADE,
+      customer_id INTEGER,
+      society_id INTEGER,
       order_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      status TEXT DEFAULT 'PLACED',
-      total_amount REAL NOT NULL
+      status TEXT DEFAULT 'PENDING',
+      total_amount REAL NOT NULL,
+      delivery_address TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS order_details (
-      order_id INTEGER REFERENCES orders(order_id) ON DELETE CASCADE,
-      item_id INTEGER REFERENCES items(item_id) ON DELETE CASCADE,
+      order_id TEXT NOT NULL,
+      item_id INTEGER,
+      item_name TEXT,
       quantity INTEGER NOT NULL,
-      unit_price REAL NOT NULL,
-      item_total REAL NOT NULL,
-      PRIMARY KEY (order_id, item_id)
+      price REAL DEFAULT 0,
+      unit_price REAL DEFAULT 0,
+      item_total REAL DEFAULT 0,
+      PRIMARY KEY (order_id, item_name)
     );
 
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -412,6 +471,13 @@ async function setupTablesSqlite() {
 
       // Safe column migration for existing SQLite databases
       const columns = [
+        `ALTER TABLE societies ADD COLUMN pincode TEXT DEFAULT '201310'`,
+        `ALTER TABLE societies ADD COLUMN total_flats INTEGER DEFAULT 850`,
+        `ALTER TABLE societies ADD COLUMN rwa_phone TEXT DEFAULT '9876543210'`,
+        `ALTER TABLE societies ADD COLUMN image_url TEXT DEFAULT 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800'`,
+        `ALTER TABLE societies ADD COLUMN banner_image TEXT DEFAULT 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=1200'`,
+        `ALTER TABLE vendors ADD COLUMN opening_time TEXT DEFAULT '08:00 AM'`,
+        `ALTER TABLE vendors ADD COLUMN closing_time TEXT DEFAULT '10:00 PM'`,
         `ALTER TABLE vendors ADD COLUMN opening_timing TEXT DEFAULT '08:00 AM'`,
         `ALTER TABLE vendors ADD COLUMN closing_timing TEXT DEFAULT '10:00 PM'`,
         `ALTER TABLE vendors ADD COLUMN min_order_value REAL DEFAULT 0.00`,
@@ -420,13 +486,17 @@ async function setupTablesSqlite() {
         `ALTER TABLE vendors ADD COLUMN gst_percentage REAL DEFAULT 5.00`,
         `ALTER TABLE vendors ADD COLUMN service_charge_percentage REAL DEFAULT 0.00`,
         `ALTER TABLE societies ADD COLUMN public_id TEXT`,
-        `ALTER TABLE vendors ADD COLUMN public_id TEXT`
+        `ALTER TABLE vendors ADD COLUMN public_id TEXT`,
+        `ALTER TABLE items ADD COLUMN in_stock INTEGER DEFAULT 1`,
+        `ALTER TABLE orders ADD COLUMN user_id TEXT`,
+        `ALTER TABLE orders ADD COLUMN society_id INTEGER`,
+        `ALTER TABLE orders ADD COLUMN delivery_address TEXT`
       ];
 
       for (const colSql of columns) {
         try {
           await new Promise(res => sqliteDb.run(colSql, () => res()));
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // Backfill public_id if missing
@@ -460,68 +530,56 @@ async function seedInitialData() {
     if (!nameCheck.rows || nameCheck.rows.length === 0) {
       await query(`INSERT INTO platform_config (config_key, config_value) VALUES ('platform_name', 'DigiLocal')`);
     }
-  } catch (_) {}
+  } catch (_) { }
 
-  const socCheck = await query('SELECT COUNT(*) as count FROM societies');
-  const count = parseInt(socCheck.rows[0]?.count || 0);
+  const { hashPassword } = require('./utils/auth');
+  const pwdHash = await hashPassword('password123');
+  const vendorPwdHash = await hashPassword('vendor123');
 
-  if (count === 0) {
-    await query(`INSERT INTO societies (society_name, location, public_id) VALUES 
-      ('Greenwood Residency', 'Block A, Sector 62, Noida', '${genPublicId(5)}'),
-      ('Palm Meadows Apartment', 'Phase 2, Whitefield, Bangalore', '${genPublicId(5)}'),
-      ('Sunrise Heights', 'Powai, Mumbai', '${genPublicId(5)}'),
-      ('Royal Garden Enclave', 'Viman Nagar, Pune', '${genPublicId(5)}')
-    `);
+  const usrCheck = await query(`SELECT user_id FROM users WHERE user_id = ?`, ['usr_101']);
+  if (!usrCheck.rows || usrCheck.rows.length === 0) {
+    await query(`INSERT INTO users (user_id, name, email, phone, password_hash, society_id, flat, joined_date, avatar) VALUES
+      ('usr_101', 'Rahul Sharma', 'rahul.sharma@gmail.com', '9876543210', '${pwdHash}', 1, 'Tower A-402', 'August 2026', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200')
+    `).catch(() => {});
+  }
 
-    await query(`INSERT INTO vendors (society_id, vendor_name, gst_number, phone_number, email, password, store_name, logo, description, status, public_id) VALUES 
-      (1, 'Rajesh Sharma', '07AAACR12341Z5', '9876543210', 'freshmart@gmail.com', 'vendor123', 'FreshMart Grocery & Organic', 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=300&auto=format&fit=crop&q=80', 'Your neighborhood fresh fruits, organic vegetables & daily dairy essentials.', 'ACTIVE', '${genPublicId(6)}'),
-      (1, 'Anil Kumar', '07BBBDS98762Z1', '9812345678', 'bakesandbites@gmail.com', 'vendor123', 'Bakes & Bites Bakery', 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=300&auto=format&fit=crop&q=80', 'Artisanal breads, fresh cakes, pastries and tea-time snacks delivered warm to your door.', 'ACTIVE', '${genPublicId(6)}'),
-      (2, 'Meena Swaminathan', '29CCCCK54321Z9', '9745612300', 'southspice@gmail.com', 'vendor123', 'South Spice Daily Kitchen', 'https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=300&auto=format&fit=crop&q=80', 'Homemade authentic South Indian batters, podis, and fresh breakfast meals.', 'ACTIVE', '${genPublicId(6)}'),
-      (3, 'Sanjay Gupta', '27DDDDM11223Z8', '9988776655', 'metrochemists@gmail.com', 'vendor123', 'Metro Pharmacy & Wellness', 'https://images.unsplash.com/photo-1576602976047-174e57a47881?w=300&auto=format&fit=crop&q=80', '24x7 Prescription medicines, health supplements, and baby care products.', 'ACTIVE', '${genPublicId(6)}')
-    `);
+  const vCheck = await query(`SELECT vendor_id FROM vendors WHERE vendor_id = 1`);
+  if (!vCheck.rows || vCheck.rows.length === 0) {
+    await query(`INSERT INTO vendors (vendor_id, society_id, vendor_name, gst_number, phone_number, email, password, password_hash, store_name, opening_time, closing_time, logo, description, status, public_id) VALUES 
+      (1, 1, 'Rajesh Sharma', '07AAACR12341Z5', '9876543210', 'vendor@digilocal.com', 'vendor123', '${vendorPwdHash}', 'FreshMart Grocery & Organic', '08:00 AM', '10:00 PM', 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=200', 'Quality goods & daily essentials delivered within society via WhatsApp.', 'ACTIVE', '${genPublicId(6)}')
+    `).catch(() => {});
+  }
 
-    const today = new Date();
-    const nextYear = new Date();
-    nextYear.setFullYear(today.getFullYear() + 1);
+  const itemCheck = await query(`SELECT item_id FROM items WHERE item_id = 101`);
+  if (!itemCheck.rows || itemCheck.rows.length === 0) {
+    const boolTrue = isPg ? 'TRUE' : '1';
+    await query(`INSERT INTO items (item_id, vendor_id, item_name, description, price, stock, category, unit, is_available, in_stock, image_url) VALUES 
+      (101, 1, 'Fresh Organic Milk (1L)', 'Pure farm fresh whole cow milk pouch.', 68.00, 50, 'Dairy & Milk', '1 Litre', ${boolTrue}, ${boolTrue}, 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400'),
+      (102, 1, 'Fresh Butter 500g', 'Pure unsalted cream butter block.', 180.00, 30, 'Dairy & Milk', '500g', ${boolTrue}, ${boolTrue}, 'https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=400'),
+      (103, 1, 'Multigrain Bread', 'Fresh 100% multigrain brown bread loaf.', 50.00, 20, 'Bakery', '400g', ${boolTrue}, ${boolTrue}, 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400'),
+      (105, 1, 'Organic Honey (250g)', 'Raw unpasteurized forest honey.', 240.00, 15, 'Organic', '250g', ${boolTrue}, ${boolTrue}, 'https://images.unsplash.com/photo-1587049352847-4a222e784d38?w=400')
+    `).catch((err) => console.error('Error seeding items:', err.message));
 
-    const todayStr = today.toISOString().split('T')[0];
-    const nextYearStr = nextYear.toISOString().split('T')[0];
+    await query(`INSERT INTO catalog_items (item_id, vendor_id, item_name, price, category, description, image_url, in_stock) VALUES 
+      (101, 1, 'Fresh Organic Milk (1L)', 68.00, 'Dairy & Milk', 'Pure farm fresh whole cow milk pouch.', 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400', ${boolTrue}),
+      (102, 1, 'Fresh Butter 500g', 180.00, 'Dairy & Milk', 'Pure unsalted cream butter block.', 'https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?w=400', ${boolTrue}),
+      (103, 1, 'Multigrain Bread', 50.00, 'Bakery', 'Fresh 100% multigrain brown bread loaf.', 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400', ${boolTrue}),
+      (105, 1, 'Organic Honey (250g)', 240.00, 'Organic', 'Raw unpasteurized forest honey.', 'https://images.unsplash.com/photo-1587049352847-4a222e784d38?w=400', ${boolTrue})
+    `).catch((err) => console.error('Error seeding catalog_items:', err.message));
+  }
 
-    for (let vId = 1; vId <= 4; vId++) {
-      await query(`INSERT INTO subscriptions (vendor_id, start_date, end_date, status) VALUES (?, ?, ?, 'ACTIVE')`, [vId, todayStr, nextYearStr]);
-      await query(`INSERT INTO payments (subscription_id, vendor_id, amount, payment_method, transaction_id, status) VALUES (?, ?, 2999.00, 'Razorpay (UPI)', ?, 'SUCCESS')`, [vId, vId, `TXN_INIT_${Date.now()}_${vId}`]);
-    }
+  const ordCheck = await query(`SELECT order_id FROM orders WHERE order_id = ?`, ['ORD-9842']);
+  if (!ordCheck.rows || ordCheck.rows.length === 0) {
+    await query(`INSERT INTO orders (order_id, user_id, vendor_id, society_id, total_amount, status, delivery_address) VALUES 
+      ('ORD-9842', 'usr_101', 1, 1, 236.00, 'DELIVERED', 'Tower A-402, Omaxe Greenwood Residency'),
+      ('ORD-9843', 'usr_101', 1, 1, 180.00, 'PENDING', 'Tower A-402')
+    `).catch((err) => console.error('Error seeding orders:', err.message));
 
-    await query(`INSERT INTO vendors (society_id, vendor_name, gst_number, phone_number, email, password, store_name, logo, description, status, public_id) VALUES 
-      (4, 'Pooja Verma', '27EEEEV99887Z3', '9123456789', 'royalcleaners@gmail.com', 'vendor123', 'Royal Laundry & Dry Cleaning', 'https://images.unsplash.com/photo-1517677208171-0bc6725a3e60?w=300&auto=format&fit=crop&q=80', 'Eco-friendly dry cleaning, steam ironing, and shoe cleaning services.', 'PENDING', '${genPublicId(6)}')
-    `);
-    await query(`INSERT INTO subscriptions (vendor_id, start_date, end_date, status) VALUES (5, NULL, NULL, 'PENDING')`);
-    await query(`INSERT INTO payments (subscription_id, vendor_id, amount, payment_method, transaction_id, status) VALUES (5, 5, 2999.00, 'Razorpay (Card)', 'TXN_PENDING_REQ_5', 'SUCCESS')`);
-
-    await query(`INSERT INTO items (vendor_id, item_name, description, price, stock, category, unit, is_available, image_url) VALUES 
-      (1, 'Farm Fresh Organic Milk (1L)', 'Pure whole cow milk sourced directly from local dairy farms.', 68.00, 50, 'Dairy', '1 Litre', 1, 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=300&auto=format&fit=crop&q=80'),
-      (1, 'Fresh Alphonso Mangoes (1kg)', 'Sweet hand-picked premium Ratnagiri Alphonso mangoes.', 240.00, 25, 'Fruits', '1 kg', 1, 'https://images.unsplash.com/photo-1553279768-865429fa0078?w=300&auto=format&fit=crop&q=80'),
-      (1, 'Organic Brown Eggs (Pack of 6)', 'Free-range cage-free nutrient rich brown eggs.', 75.00, 40, 'Dairy & Eggs', '6 pcs', 1, 'https://images.unsplash.com/photo-1516467508483-a7212febe31a?w=300&auto=format&fit=crop&q=80'),
-      (1, 'Whole Wheat Sourdough Bread', 'Freshly baked artisanal 100% whole wheat sourdough loaf.', 110.00, 15, 'Bakery', '400g', 1, 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=300&auto=format&fit=crop&q=80'),
-      (1, 'Exotic Hass Avocado', 'Ready-to-eat ripe avocado perfect for salads and toast.', 99.00, 0, 'Fruits', '1 pc', 0, 'https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=300&auto=format&fit=crop&q=80')
-    `);
-
-    await query(`INSERT INTO items (vendor_id, item_name, description, price, stock, category, unit, is_available, image_url) VALUES 
-      (2, 'Belgian Chocolate Truffle Cake', 'Rich 500g dark chocolate layer cake topped with ganache.', 550.00, 10, 'Cakes', '500g', 1, 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=300&auto=format&fit=crop&q=80'),
-      (2, 'Butter Croissants (Pack of 2)', 'Flaky, buttery French golden croissants.', 140.00, 20, 'Pastries', '2 pcs', 1, 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=300&auto=format&fit=crop&q=80'),
-      (2, 'Blueberry Cheesecake Slice', 'Classic New York style creamy cheesecake slice with fruit compote.', 180.00, 12, 'Desserts', '1 slice', 1, 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=300&auto=format&fit=crop&q=80')
-    `);
-
-    await query(`INSERT INTO customers (customer_name, phone_number, address) VALUES 
-      ('Rahul Verma', '9898989898', 'Flat 402, Tower B, Greenwood Residency')
-    `);
-
-    await query(`INSERT INTO orders (vendor_id, customer_id, status, total_amount) VALUES (1, 1, 'PLACED', 308.00)`);
-    await query(`INSERT INTO order_details (order_id, item_id, quantity, unit_price, item_total) VALUES 
-      (1, 1, 1, 68.00, 68.00),
-      (1, 2, 1, 240.00, 240.00)
-    `);
-
+    await query(`INSERT INTO order_details (order_id, item_id, item_name, quantity, price, unit_price, item_total) VALUES 
+      ('ORD-9842', 101, 'Fresh Organic Milk (1L)', 2, 68.00, 68.00, 136.00),
+      ('ORD-9842', 103, 'Multigrain Bread', 1, 50.00, 50.00, 50.00),
+      ('ORD-9843', 102, 'Fresh Butter 500g', 1, 180.00, 180.00, 180.00)
+    `).catch((err) => console.error('Error seeding order_details:', err.message));
   }
 }
 
